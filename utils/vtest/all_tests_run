@@ -6,11 +6,15 @@
 ##
 
 ## Taskset to run vRouter/DPDK.
-TASKSET="taskset 0x1"
+TASKSET="taskset 0x2" /* Changes to support Monitoring Interfaces in UT scenarios */
 ## vRouter/DPDK binary name.
 VROUTER="vrouter/dpdk/contrail-vrouter-dpdk"
+
 ## vRouter/DPDK command line arguments.
-VROUTER_DEF_ARGS="--no-daemon --no-huge --vr_packet_sz 2048"
+# Changes to support Monitoring Interfaces in UT scenarios */
+#VROUTER_DEF_ARGS="--no-daemon --no-huge --vr_packet_sz 2048"
+VROUTER_DEF_ARGS="--no-daemon --socket-mem 1024"
+
 ## vRouter config file.
 RTE_CONFIGS="/var/run/.rte_config /home/${USER}/.rte_config"
 ## vTest binary name.
@@ -23,7 +27,10 @@ DPDK_NETLINK_PORT="20914"
 ## Global vRouter/DPDK process ID.
 VROUTER_PID=""
 ## Global vRouter/DPDK startup timeout.
-VROUTER_TIMEOUT="5"
+# Changes to support Monitoring Interfaces in UT scenarios
+#VROUTER_TIMEOUT="5"
+VROUTER_TIMEOUT="60"
+
 ## Global build directory.
 BUILD_DIR="../../../build/debug"
 ## Global XML dir.

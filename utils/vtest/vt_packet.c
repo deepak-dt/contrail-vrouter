@@ -4,6 +4,7 @@
 #include <limits.h>
 #include <time.h>
 #include <unistd.h>
+#include <stdlib.h> /* Changes to support Monitoring Interfaces in UT scenarios */
 
 #include <libxml/xmlmemory.h>
 #include <libxml/parser.h>
@@ -92,10 +93,14 @@ vt_packet(xmlNodePtr node, struct vtest *test)
                     continue;
                 }
                 if (l_node_interface->children && l_node_interface->children->content) {
-
-                    (test->packet_tx.vif_id =
-                     strtoul(l_node_interface->children->content, NULL, 0));
-                    break;
+                    /* Changes to support Monitoring Interfaces in UT scenarios */
+                    if (!strncmp(l_node_interface->name, "vif_index", strlen(l_node_interface->name))) {
+                        (test->packet_tx.vif_id =
+                         strtoul(l_node_interface->children->content, NULL, 0));
+                    }
+                    else if (!strncmp(l_node_interface->name, "vif_mac", strlen(l_node_interface->name))) {
+                        strcpy(test->packet_tx.vif_mac, l_node_interface->children->content);
+                    }
                 }
                 l_node_interface = l_node_interface->next;
 
@@ -110,14 +115,22 @@ vt_packet(xmlNodePtr node, struct vtest *test)
                     continue;
                 }
                 if (l_node_interface->children && l_node_interface->children->content) {
-                    (test->packet_rx[test->packet.rx_client_num].vif_id =
-                     strtoul(l_node_interface->children->content, NULL, 0));
-                    //for multicast purpose 1:M, multicast is not implemented
-                    test->packet.rx_client_num += 1;
-                    break;
+                    /* Changes to support Monitoring Interfaces in UT scenarios */
+                    if (!strncmp(l_node_interface->name, "vif_index", strlen(l_node_interface->name))) {
+                        (test->packet_rx[test->packet.rx_client_num].vif_id =
+                         strtoul(l_node_interface->children->content, NULL, 0));
+                    } else if (!strncmp(l_node_interface->name, "vif_type", strlen(l_node_interface->name))) {
+                        (test->packet_rx[test->packet.rx_client_num].vif_type =
+                         strtoul(l_node_interface->children->content, NULL, 0));
+                    } else if (!strncmp(l_node_interface->name, "vif_name", strlen(l_node_interface->name))) {
+                        strcpy(test->packet_rx[test->packet.rx_client_num].vif_name, l_node_interface->children->content);
+                    }
                 }
                 l_node_interface = l_node_interface->next;
             }
+            /* Changes to support Monitoring Interfaces in UT scenarios */
+            //for multicast purpose 1:M, multicast is not implemented
+            test->packet.rx_client_num += 1;
         }
         node = node->next;
 
@@ -272,7 +285,22 @@ tx_rx_pcap_test(struct vtest *test) {
     memset(&tx_rx_handler, 0, sizeof(struct tx_rx_handler));
 
     tx_state = init_vhost_net(&tx_rx_handler.send_data, src_vif_ctrl_sock);
-    rx_state = init_vhost_net(&tx_rx_handler.recv_data, dst_vif_ctrl_sock);
+
+    /* Start: Changes to support Monitoring Interfaces in UT scenarios */
+    char *rx_intf_name = NULL;
+    int rx_intf_type = -1;
+    char *tx_mac_addr = NULL;
+    char *capture_script_path_name = "/opt/stack/contrail/vrouter/utils/vtest/capture_kni.sh";
+    char rx_vif_shell_cmd[3*UNIX_PATH_MAX];
+
+    rx_intf_name = test->packet_rx[0].vif_name;
+    rx_intf_type = test->packet_rx[0].vif_type;
+    tx_mac_addr = test->packet_tx.vif_mac;
+
+    if (rx_intf_type != VIF_TYPE_MONITORING) {
+        rx_state = init_vhost_net(&tx_rx_handler.recv_data, dst_vif_ctrl_sock);
+    }
+	/* End: Changes to support Monitoring Interfaces in UT scenarios */
 
     if (tx_state != E_VHOST_NET_OK || rx_state != E_VHOST_NET_OK) {
         return E_PACKET_ERR;
@@ -312,6 +340,16 @@ tx_rx_pcap_test(struct vtest *test) {
     // We need to be sure, that vRouter has empty desc for writing packets. -> sleep(1);
     sleep(1);
 
+    /* Start: Changes to support Monitoring Interfaces in UT scenarios */
+    if (rx_intf_type == VIF_TYPE_MONITORING) {
+        snprintf(rx_vif_shell_cmd, 3*UNIX_PATH_MAX, "%s start %s %s %s",
+                 capture_script_path_name, rx_intf_name, test->packet.pcap_dest_file, tx_mac_addr);
+
+        system(rx_vif_shell_cmd);
+    }
+    sleep(5);
+	/* End: Changes to support Monitoring Interfaces in UT scenarios */
+
     while(1) {
         //Now we can send next data
         if (tx_rx_state == S_SEND) {
@@ -323,7 +361,10 @@ tx_rx_pcap_test(struct vtest *test) {
                         tx_rx_handler.send_data->context,
                         (u_char *)tx_rx_handler.pkt_data,
                         (size_t *) &(tx_rx_handler.pkt_header->len)));
-            tx_rx_state = S_RECV;
+            /* Changes to support Monitoring Interfaces in UT scenarios */
+            if (rx_intf_type != VIF_TYPE_MONITORING) {
+                tx_rx_state = S_RECV;
+            }
         } else if (tx_rx_state == S_RECV) {
             return_val_rx = (tx_rx_handler.recv_data->rx(
                         tx_rx_handler.recv_data->context,
@@ -364,7 +405,17 @@ tx_rx_pcap_test(struct vtest *test) {
     pcap_close(tx_rx_handler.pd);
     pcap_dump_close(tx_rx_handler.dumper);
     deinit_vhost_net(tx_rx_handler.send_data);
-    deinit_vhost_net(tx_rx_handler.recv_data);
+    /* Start: Changes to support Monitoring Interfaces in UT scenarios */
+    if (rx_intf_type != VIF_TYPE_MONITORING) {
+        deinit_vhost_net(tx_rx_handler.recv_data);
+    } else {
+        //stop the pcap capture started from script
+        snprintf(rx_vif_shell_cmd, 3*UNIX_PATH_MAX, "%s stop",
+                 capture_script_path_name);
+
+        system(rx_vif_shell_cmd);
+    }
+	/* End: Changes to support Monitoring Interfaces in UT scenarios */
 
     return E_PACKET_OK;
 }
